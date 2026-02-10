@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <title>魔法系統 - 機關門修正版</title>
+    <style>
+      :root {
+        --magic-blue: #00d4ff;
+        --dark-bg: #05050a;
+        --border-gold: #c5a059;
+        --door-locked: #5d4037;
+        --door-open: #2ecc71;
+      }
+
+      body,
+      html {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: var(--dark-bg);
+        font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+      }
+      canvas {
+        display: block;
+      }
+
+      /* UI 介面 */
+      #menu-overlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        background: radial-gradient(circle, #1a1a2e 0%, #000 100%);
+        color: white;
+        z-index: 10;
+        transition: opacity 0.8s;
+      }
+      h1 {
+        font-size: 3rem;
+        letter-spacing: 15px;
+        text-shadow: 0 0 15px var(--magic-blue);
+        margin: 0;
+      }
+      .start-btn {
+        margin-top: 40px;
+        padding: 15px 50px;
+        font-size: 1.2rem;
+        background: rgba(0, 0, 0, 0.6);
+        color: var(--magic-blue);
+        border: 2px solid var(--magic-blue);
+        cursor: pointer;
+        border-radius: 4px;
+      }
+
+      #dialogue-box {
+        position: absolute;
+        bottom: 30px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 80%;
+        max-width: 800px;
+        height: 100px;
+        background: rgba(10, 10, 25, 0.95);
+        border: 2px solid var(--border-gold);
+        padding: 20px;
+        color: #fff;
+        display: none;
+        z-index: 5;
+        cursor: pointer;
+        border-radius: 8px;
+      }
+      #room-name {
+        position: absolute;
+        top: 30px;
+        width: 100%;
+        text-align: center;
+        color: #fff;
+        font-size: 1.5rem;
+        display: none;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="room-name">〈 遺 忘 之 室 〉</div>
+    <div id="menu-overlay">
+      <h1>魔法系統</h1>
+      <div style="color: #666; margin-top: 10px">目標：啟動機關並逃離房間</div>
+      <button class="start-btn" onclick="initStory()">踏入旅程</button>
+    </div>
+
+    <div id="dialogue-box" onclick="nextDialogue()">
+      <div id="dialogue-text"></div>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+      // 使用單一作用域確保 const 不重複報錯
+      (function () {
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let gameState = 'MENU';
+        let currentLine = 0;
+        let hasMagic = false;
+        let doorOpen = false;
+        const TILE_SIZE = 70;
+        const fireballs = [];
+
+        const storyData = [
+          '系統初始化...',
+          '出口被鎖上了。牆上的紅色節點是唯一的開關。',
+          '首先，你必須獲取房間中央的『代碼核心』。',
+          '使用 WASD 移動，滑鼠點擊發射火球。',
+        ];
+
+        const player = { gridX: 1, gridY: 2 };
+        const roomMap = [
+          [1, 1, 1, 1, 1, 1, 1, 1],
+          [1, 0, 0, 0, 5, 0, 0, 1],
+          [1, 0, 0, 0, 0, 3, 0, 4],
+          [1, 0, 0, 0, 0, 0, 0, 1],
+          [1, 1, 1, 1, 1, 1, 1, 1],
+        ];
+
+        function resize() {
+          canvas.width = window.innerWidth;
+          canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // 暴露給全域按鈕
+        window.initStory = function () {
+          document.getElementById('menu-overlay').style.opacity = '0';
+          setTimeout(() => {
+            document.getElementById('menu-overlay').style.display = 'none';
+            document.getElementById('dialogue-box').style.display = 'block';
+            gameState = 'STORY';
+            nextDialogue();
+          }, 800);
+        };
+
+        window.nextDialogue = function () {
+          if (currentLine < storyData.length) {
+            document.getElementById('dialogue-text').innerText =
+              storyData[currentLine];
+            currentLine++;
+          } else {
+            gameState = 'ROOM';
+            document.getElementById('dialogue-box').style.display = 'none';
+            document.getElementById('room-name').style.display = 'block';
+          }
+        };
+
+        window.addEventListener('keydown', (e) => {
+          if (gameState !== 'ROOM') return;
+          let dx = 0,
+            dy = 0;
+          if (e.key === 'w' || e.key === 'ArrowUp') dy = -1;
+          if (e.key === 's' || e.key === 'ArrowDown') dy = 1;
+          if (e.key === 'a' || e.key === 'ArrowLeft') dx = -1;
+          if (e.key === 'd' || e.key === 'ArrowRight') dx = 1;
+
+          const nextX = player.gridX + dx;
+          const nextY = player.gridY + dy;
+
+          if (roomMap[nextY] && roomMap[nextY][nextX] === 0) {
+            player.gridX = nextX;
+            player.gridY = nextY;
+          } else if (roomMap[nextY] && roomMap[nextY][nextX] === 3) {
+            hasMagic = true;
+            roomMap[2][5] = 0;
+            alert('【系統通知】火球術已解鎖！');
+          } else if (
+            roomMap[nextY] &&
+            roomMap[nextY][nextX] === 4 &&
+            doorOpen
+          ) {
+            alert('你成功開啟了大門！');
+            location.reload();
+          }
+        });
+
+        canvas.addEventListener('mousedown', (e) => {
+          if (!hasMagic || gameState !== 'ROOM') return;
+          const rect = canvas.getBoundingClientRect();
+          const offsetX = (canvas.width - roomMap[0].length * TILE_SIZE) / 2;
+          const offsetY = (canvas.height - roomMap.length * TILE_SIZE) / 2;
+          const startX = offsetX + player.gridX * TILE_SIZE + TILE_SIZE / 2;
+          const startY = offsetY + player.gridY * TILE_SIZE + TILE_SIZE / 2;
+          const angle = Math.atan2(
+            e.clientY - rect.top - startY,
+            e.clientX - rect.left - startX
+          );
+          fireballs.push({
+            x: startX,
+            y: startY,
+            vx: Math.cos(angle) * 12,
+            vy: Math.sin(angle) * 12,
+          });
+        });
+
+        function draw() {
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+          if (gameState === 'ROOM' || gameState === 'STORY') {
+            const offsetX = (canvas.width - roomMap[0].length * TILE_SIZE) / 2;
+            const offsetY = (canvas.height - roomMap.length * TILE_SIZE) / 2;
+
+            roomMap.forEach((row, y) => {
+              row.forEach((tile, x) => {
+                const tx = offsetX + x * TILE_SIZE;
+                const ty = offsetY + y * TILE_SIZE;
+                if (tile === 1) {
+                  ctx.fillStyle = '#1a1a1a';
+                  ctx.fillRect(tx + 2, ty + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+                } else if (tile === 3) {
+                  ctx.fillStyle = '#00d4ff';
+                  ctx.shadowBlur = 15;
+                  ctx.shadowColor = '#00d4ff';
+                  ctx.fillRect(tx + 20, ty + 20, 30, 30);
+                } else if (tile === 4) {
+                  ctx.fillStyle = doorOpen ? '#2ecc71' : '#5d4037';
+                  ctx.fillRect(tx + 5, ty, TILE_SIZE - 10, TILE_SIZE);
+                } else if (tile === 5) {
+                  ctx.fillStyle = doorOpen ? '#333' : 'red';
+                  ctx.beginPath();
+                  ctx.arc(tx + 35, ty + 35, 15, 0, Math.PI * 2);
+                  ctx.fill();
+                }
+                ctx.shadowBlur = 0;
+              });
+            });
+
+            fireballs.forEach((fb, i) => {
+              fb.x += fb.vx;
+              fb.y += fb.vy;
+              ctx.fillStyle = '#ffcc00';
+              ctx.shadowBlur = 10;
+              ctx.shadowColor = 'orange';
+              ctx.beginPath();
+              ctx.arc(fb.x, fb.y, 8, 0, Math.PI * 2);
+              ctx.fill();
+
+              const gx = Math.floor((fb.x - offsetX) / TILE_SIZE);
+              const gy = Math.floor((fb.y - offsetY) / TILE_SIZE);
+              if (roomMap[gy] && roomMap[gy][gx] === 5) {
+                doorOpen = true;
+                fireballs.splice(i, 1);
+              }
+            });
+
+            ctx.fillStyle = '#fff';
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = '#fff';
+            ctx.fillRect(
+              offsetX + player.gridX * TILE_SIZE + 20,
+              offsetY + player.gridY * TILE_SIZE + 20,
+              30,
+              30
+            );
+            ctx.shadowBlur = 0;
+          }
+          requestAnimationFrame(draw);
+        }
+        draw();
+      })();
+    </script>
+  </body>
+</html>
