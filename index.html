@@ -2,14 +2,13 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>魔法系統 - 終極穩定版 (含死亡畫面)</title>
+    <title>魔法系統 - 強化生存版</title>
     <style>
-        :root { --magic-blue: #00d4ff; --magic-ice: #a0f0ff; --dark-bg: #05050a; --hp-red: #ff3333; }
+        :root { --magic-blue: #00d4ff; --magic-ice: #a0f0ff; --dark-bg: #05050a; --hp-red: #ff3333; --player-hp: #2ecc71; }
         body, html { margin: 0; padding: 0; overflow: hidden; background: var(--dark-bg); font-family: sans-serif; }
         canvas { display: block; }
         #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
         
-        /* 統一選單與死亡畫面樣式 */
         .full-screen { 
             position: absolute; width: 100%; height: 100%; background: rgba(0,0,0,0.9); 
             display: flex; flex-direction: column; justify-content: center; align-items: center; 
@@ -24,14 +23,17 @@
             box-shadow: 0 0 15px var(--magic-blue); transition: 0.3s;
         }
         .btn:hover { background: var(--magic-blue); color: #000; }
-        
         .btn-red { border-color: var(--hp-red); color: var(--hp-red); box-shadow: 0 0 15px var(--hp-red); }
         .btn-red:hover { background: var(--hp-red); color: #fff; }
 
+        /* 玩家 UI */
+        #player-ui { position: absolute; top: 20px; left: 20px; width: 250px; text-align: left; }
+        .bar-bg { width: 100%; height: 12px; background: #222; border: 1px solid #444; border-radius: 6px; overflow: hidden; }
+        #player-hp-bar { width: 100%; height: 100%; background: var(--player-hp); transition: 0.2s; box-shadow: 0 0 10px var(--player-hp); }
+
         #room-title { position: absolute; top: 20px; width: 100%; text-align: center; color: rgba(255,255,255,0.7); font-size: 1.2rem; letter-spacing: 8px; }
         #boss-ui { position: absolute; top: 60px; left: 50%; transform: translateX(-50%); width: 400px; display: none; text-align: center; }
-        #hp-container { width: 100%; height: 10px; background: #222; border: 1px solid #555; border-radius: 5px; overflow: hidden; }
-        #hp-bar { width: 100%; height: 100%; background: var(--hp-red); transition: 0.1s; }
+        #boss-hp-bar { width: 100%; height: 10px; background: var(--hp-red); transition: 0.1s; }
         
         h1 { color: white; letter-spacing: 15px; margin-bottom: 30px; text-shadow: 0 0 20px rgba(255,255,255,0.5); }
         .death-text { color: var(--hp-red); text-shadow: 0 0 20px red; }
@@ -40,11 +42,16 @@
 <body>
 
 <div id="ui">
+    <div id="player-ui">
+        <div style="color:var(--player-hp); font-size:0.7rem; margin-bottom:5px; letter-spacing: 2px;">SYNC RATIO (PLAYER HP)</div>
+        <div class="bar-bg"><div id="player-hp-bar"></div></div>
+    </div>
+
     <div id="room-title">SYSTEM READY</div>
     
     <div id="boss-ui">
         <div style="color:white; font-size:0.8rem; margin-bottom:5px; letter-spacing: 3px;">ANCIENT GUARDIAN</div>
-        <div id="hp-container"><div id="hp-bar"></div></div>
+        <div class="bar-bg" style="height: 10px;"><div id="boss-hp-bar" style="width:100%"></div></div>
     </div>
 
     <div id="overlay" class="full-screen">
@@ -67,7 +74,15 @@ window.App = (function() {
     const ctx = canvas.getContext('2d');
     let state = "MENU", currentScene = "ROOM", hasMagic = false, hasIcePower = false, doorOpen = false;
     const TILE = 64, projectiles = [], enemyProjectiles = [], particles = [];
-    const player = { x: 1, y: 2 };
+    
+    // 玩家屬性更新
+    const player = { 
+        x: 1, y: 2, 
+        hp: 100, maxHp: 100, 
+        invul: 0, // 無敵時間計數器
+        isHurt: false 
+    };
+
     let enemies = [], lasers = [], chest = null, boss = null;
 
     const scenes = {
@@ -83,6 +98,24 @@ window.App = (function() {
     window.addEventListener('resize', resize); resize();
 
     function explode(x, y, color) { for(let i=0; i<15; i++) particles.push({ x, y, vx:(Math.random()-0.5)*12, vy:(Math.random()-0.5)*12, life:1.0, color }); }
+
+    function takeDamage(amount) {
+        if (player.invul > 0 || state !== "PLAY") return;
+        player.hp -= amount;
+        player.invul = 60; // 約 1 秒無敵
+        player.isHurt = true;
+        explode(ox + player.x * TILE + 32, oy + player.y * TILE + 32, "red");
+        if (player.hp <= 0) {
+            player.hp = 0;
+            gameOver();
+        }
+        updateUI();
+    }
+
+    function updateUI() {
+        document.getElementById('player-hp-bar').style.width = (player.hp / player.maxHp * 100) + "%";
+        if (boss) document.getElementById('boss-hp-bar').style.width = (boss.hp / boss.maxHp * 100) + "%";
+    }
 
     function gameOver() {
         state = "GAMEOVER";
@@ -100,6 +133,7 @@ window.App = (function() {
         document.getElementById('boss-ui').style.display = (sceneName === "BOSS_ROOM") ? 'block' : 'none';
         if (sceneName === "BOSS_ROOM") boss = { x: 4, y: 1, hp: 100, maxHp: 100, dir: 1, speed: 0.04, lastShot: 0 };
         else boss = null;
+        updateUI();
     }
 
     window.addEventListener('keydown', (e) => {
@@ -115,7 +149,7 @@ window.App = (function() {
             
             if (chest && player.x === chest.x && player.y === chest.y) {
                 hasIcePower = true; chest = null; 
-                explode(player.x*TILE+32 + (canvas.width - currentMap[0].length * TILE) / 2, player.y*TILE+32 + (canvas.height - currentMap.length * TILE) / 2, "gold"); 
+                explode(player.x*TILE+32+ox, player.y*TILE+32+oy, "gold"); 
             }
             if (currentMap[ny][nx] === 4 && doorOpen) {
                 if (currentScene === "ROOM") changeScene("CORRIDOR", 13, 2);
@@ -124,25 +158,23 @@ window.App = (function() {
             }
         } else if (currentMap[ny] && currentMap[ny][nx] === 3) { 
             hasMagic=true; currentMap[ny][nx]=0; 
-            const ox = (canvas.width - currentMap[0].length * TILE) / 2, oy = (canvas.height - currentMap.length * TILE) / 2;
             explode(nx*TILE+32+ox, ny*TILE+32+oy, "#00d4ff"); 
         }
     });
 
     canvas.addEventListener('mousedown', (e) => {
         if (!hasMagic || state !== "PLAY") return;
-        const ox = (canvas.width - currentMap[0].length * TILE) / 2, oy = (canvas.height - currentMap.length * TILE) / 2;
         const px = ox + player.x * TILE + 32, py = oy + player.y * TILE + 32;
         const angle = Math.atan2(e.clientY - py, e.clientX - px);
         projectiles.push({ x: px, y: py, vx: Math.cos(angle)*15, vy: Math.sin(angle)*15, type: 'fire', color: '#ff4400' });
         if (hasIcePower) projectiles.push({ x: px, y: py, vx: Math.cos(angle+0.15)*15, vy: Math.sin(angle+0.15)*15, type: 'ice', color: '#a0f0ff' });
     });
 
+    let ox, oy;
     function update() {
         ctx.fillStyle = "#000"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // 即使在 Game Over 也要繼續畫粒子和背景，只是不處理邏輯
-        const ox = (canvas.width - currentMap[0].length * TILE) / 2, oy = (canvas.height - currentMap.length * TILE) / 2;
+        ox = (canvas.width - currentMap[0].length * TILE) / 2;
+        oy = (canvas.height - currentMap.length * TILE) / 2;
 
         // 地圖繪製
         currentMap.forEach((row, y) => row.forEach((tile, x) => {
@@ -154,7 +186,9 @@ window.App = (function() {
         }));
 
         if (state === "PLAY") {
-            // 紅色小兵邏輯
+            if (player.invul > 0) player.invul--;
+
+            // 小兵
             if (currentScene === "ENEMY_ROOM") {
                 enemies.forEach(e => {
                     if (!e.isAlive) return;
@@ -162,7 +196,7 @@ window.App = (function() {
                     if (e.x > e.endX || e.x < e.startX) e.dir *= -1;
                     ctx.fillStyle = "#ff1111"; ctx.shadowBlur = 15; ctx.shadowColor = "red";
                     ctx.fillRect(ox + e.x * TILE + 16, oy + e.y * TILE + 16, 32, 32); ctx.shadowBlur = 0;
-                    if (Math.hypot(player.x - e.x, player.y - e.y) < 0.6) gameOver();
+                    if (Math.hypot(player.x - e.x, player.y - e.y) < 0.6) takeDamage(30);
                 });
                 if (enemies.every(e => !e.isAlive)) {
                     if (!hasIcePower && !chest) chest = { x: 4, y: 2 };
@@ -172,7 +206,7 @@ window.App = (function() {
 
             if (chest) { ctx.fillStyle = "#ffd700"; ctx.shadowBlur = 15; ctx.shadowColor="gold"; ctx.fillRect(ox+chest.x*TILE+16, oy+chest.y*TILE+16, 32, 32); ctx.shadowBlur=0;}
 
-            // BOSS 邏輯
+            // BOSS
             if (boss) {
                 boss.x += boss.speed * boss.dir;
                 if (boss.x > 7 || boss.x < 1) boss.dir *= -1;
@@ -182,10 +216,9 @@ window.App = (function() {
                 }
                 ctx.fillStyle = "#ff3366"; ctx.shadowBlur = 25; ctx.shadowColor = "red";
                 ctx.fillRect(ox + boss.x*TILE, oy + boss.y*TILE, TILE, TILE); ctx.shadowBlur = 0;
-                document.getElementById('hp-bar').style.width = (boss.hp/boss.maxHp)*100 + "%";
             }
 
-            // 彈幕碰撞
+            // 玩家彈幕
             projectiles.forEach((p, i) => {
                 p.x += p.vx; p.y += p.vy;
                 ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, 7); ctx.fill();
@@ -197,36 +230,43 @@ window.App = (function() {
                     boss.hp -= (p.type === 'fire' ? 6 : 2);
                     if (p.type === 'ice') boss.speed = 0.01; else setTimeout(()=> { if(boss) boss.speed = 0.04; }, 400);
                     explode(p.x, p.y, p.color); projectiles.splice(i, 1);
+                    updateUI();
                     if (boss.hp <= 0) { alert("核心守護者已崩解！"); location.reload(); }
                 }
             });
 
-            // 敵方彈幕與雷射
+            // 敵方彈幕
             enemyProjectiles.forEach((p, i) => {
                 p.y += p.vy; p.x += p.vx;
                 ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, 7); ctx.fill();
-                if (Math.hypot(p.x - (ox + player.x*TILE + 32), p.y - (oy + player.y*TILE + 32)) < 22) gameOver();
+                if (Math.hypot(p.x - (ox + player.x*TILE + 32), p.y - (oy + player.y*TILE + 32)) < 22) takeDamage(15);
                 if (p.y > canvas.height || p.x < 0 || p.x > canvas.width) enemyProjectiles.splice(i, 1);
             });
+
+            // 雷射
             lasers.forEach(l => {
                 l.x += l.vx; l.y += l.vy; if (l.x <= 1 || l.x >= 13) l.vx *= -1; if (l.y <= 1 || l.y >= 3) l.vy *= -1;
                 const lx = ox + l.x*TILE+32, ly = oy + l.y*TILE+32;
                 ctx.strokeStyle = "red"; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(lx-20, ly-20); ctx.lineTo(lx+20, ly+20); ctx.moveTo(lx+20, ly-20); ctx.lineTo(lx-20, ly+20); ctx.stroke();
-                if (Math.hypot(player.x - l.x, player.y - l.y) < 0.5) gameOver();
+                if (Math.hypot(player.x - l.x, player.y - l.y) < 0.5) takeDamage(20);
             });
         }
 
-        // 粒子繪製 (獨立於 PLAY 狀態，死亡後仍會飛散)
+        // 粒子
         particles.forEach((p, i) => {
             p.x += p.vx; p.y += p.vy; p.life -= 0.04;
             if (p.life <= 0) particles.splice(i, 1);
             else { ctx.globalAlpha = p.life; ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, 3, 3); ctx.globalAlpha = 1; }
         });
 
-        // 玩家繪製
+        // 玩家繪製 (含閃爍效果)
         if (state !== "GAMEOVER") {
-            if (hasIcePower) { ctx.shadowBlur = 15; ctx.shadowColor = "#00d4ff"; }
-            ctx.fillStyle = "#fff"; ctx.fillRect(ox + player.x * TILE + 16, oy + player.y * TILE + 16, 32, 32); ctx.shadowBlur = 0;
+            if (player.invul % 10 < 5) { // 閃爍
+                if (hasIcePower) { ctx.shadowBlur = 15; ctx.shadowColor = "#00d4ff"; }
+                ctx.fillStyle = player.invul > 0 ? "#ff8888" : "#fff";
+                ctx.fillRect(ox + player.x * TILE + 16, oy + player.y * TILE + 16, 32, 32); 
+                ctx.shadowBlur = 0;
+            }
         }
         
         requestAnimationFrame(update);
@@ -237,9 +277,10 @@ window.App = (function() {
         start: () => { document.getElementById('overlay').style.display='none'; state="PLAY"; changeScene("ROOM", 1, 2); },
         reset: () => { 
             document.getElementById('game-over').style.display='none'; 
+            player.hp = 100; player.invul = 0;
             hasMagic = false; hasIcePower = false; 
-            scenes.ROOM.map[1][4] = 5; // 重置紅點
-            scenes.ROOM.map[2][5] = 3; // 重置魔法球
+            scenes.ROOM.map[1][4] = 5; 
+            scenes.ROOM.map[2][5] = 3; 
             state="PLAY"; changeScene("ROOM", 1, 2); 
         }
     };
